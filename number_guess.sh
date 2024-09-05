@@ -1,71 +1,59 @@
 #!/bin/bash
-PSQL="psql --username=freecodecamp --dbname=postgres -t --no-align -c"
+#!/bin/bash
 
-# Generate random number between 0 and 1000
-SECRET_NUMBER=$(( ( RANDOM % 1000 ) + 0 ))
+# Connect to the number_guess database
+PSQL="psql --username=freecodecamp --dbname=number_guess -t --no-align -c"
 
-# Initialize guess count
-GUESSES=0
+# Generate a random secret number between 1 and 1000
+SECRET_NUMBER=$(( RANDOM % 1000 + 1 ))
 
-# Prompt for username
-echo -e "Enter your username:"
-read NAME
+# Prompt the user for their username
+echo "Enter your username:"
+read USERNAME
 
-# Check if the user exists in the database
-USER_DATA=$($PSQL "SELECT username, games_played, best_game FROM games WHERE username='$NAME'")
+# Check if the user already exists in the 'players' table
+USER_ID=$($PSQL "SELECT user_id FROM players WHERE username='$USERNAME'")
 
-# If user doesn't exist, welcome them as a new user
-if [[ -z $USER_DATA ]]; then
-  echo "Welcome, $NAME! It looks like this is your first time here."
-
-  # Insert the new user into the database with default values
-  $PSQL "INSERT INTO games(username, games_played, best_game) VALUES ('$NAME', 1, 1000)"
-  GAMES_PLAYED=1
-  BEST_GAME=1000
-
+# If the user doesn't exist, insert them into the 'players' table
+if [[ -z $USER_ID ]]
+then
+  echo "Welcome, $USERNAME! It looks like this is your first time here."
+  INSERT_USER_RESULT=$($PSQL "INSERT INTO players(username) VALUES('$USERNAME')")
+  USER_ID=$($PSQL "SELECT user_id FROM players WHERE username='$USERNAME'")
 else
-  # Parse the retrieved data for returning users
-  IFS="|" read USERNAME GAMES_PLAYED BEST_GAME <<< "$USER_DATA"
-  
-  # Increment games played
-  ((GAMES_PLAYED++))
-
-  # Update games played in the database
-  $PSQL "UPDATE games SET games_played=$GAMES_PLAYED WHERE username='$USERNAME'"
-
-  # Welcome back message with games played and best game stats
+  # If the user exists, fetch their game statistics
+  GAMES_PLAYED=$($PSQL "SELECT COUNT(game_id) FROM games WHERE user_id=$USER_ID")
+  BEST_GAME=$($PSQL "SELECT MIN(number_of_guesses) FROM games WHERE user_id=$USER_ID")
   echo "Welcome back, $USERNAME! You have played $GAMES_PLAYED games, and your best game took $BEST_GAME guesses."
 fi
 
-# Prompt the user to guess the secret number
-echo -e "Guess the secret number between 1 and 1000:"
+# Prompt the user to start guessing the number
+echo "Guess the secret number between 1 and 1000:"
+GUESSES=0
 
-# Loop to keep asking for guesses until the user guesses correctly
-while true; do
+while true
+do
   read GUESS
-
-  # Increment guess count
   ((GUESSES++))
 
-  # Validate input (ensure it's an integer)
-  if [[ ! $GUESS =~ ^[0-9]+$ ]]; then
-    echo -e "That is not an integer, guess again:"
-  else
-    # Provide hints and guidance for guesses
-    if [[ $GUESS -lt $SECRET_NUMBER ]]; then
-      echo -e "It's higher than that, guess again:"
-    elif [[ $GUESS -gt $SECRET_NUMBER ]]; then
-      echo -e "It's lower than that, guess again:"
-    else
-      # Correct guess! Check if it's the best game
-      if [[ $GUESSES -lt $BEST_GAME ]]; then
-        # Update the best game in the database if current game is better
-        $PSQL "UPDATE games SET best_game=$GUESSES WHERE username='$USERNAME'"
-      fi
+  # Check if the guess is a valid integer
+  if [[ ! $GUESS =~ ^[0-9]+$ ]]
+  then
+    echo "That is not an integer, guess again:"
+    continue
+  fi
 
-      # Display the success message
-      echo "You guessed it in $GUESSES tries. The secret number was $SECRET_NUMBER. Nice job!"
-      exit
-    fi
+  # Compare the guess to the secret number
+  if [[ $GUESS -lt $SECRET_NUMBER ]]
+  then
+    echo "It's higher than that, guess again:"
+  elif [[ $GUESS -gt $SECRET_NUMBER ]]
+  then
+    echo "It's lower than that, guess again:"
+  else
+    # If the guess is correct, record the game result and congratulate the user
+    echo "You guessed it in $GUESSES tries. The secret number was $SECRET_NUMBER. Nice job!"
+    INSERT_GAME_RESULT=$($PSQL "INSERT INTO games(user_id, secret_number, number_of_guesses) VALUES($USER_ID, $SECRET_NUMBER, $GUESSES)")
+    break
   fi
 done
